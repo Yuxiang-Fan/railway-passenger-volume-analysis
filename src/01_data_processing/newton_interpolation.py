@@ -1,11 +1,8 @@
 import pandas as pd
 import numpy as np
 
-def get_divided_diff_table(x, y):
-    """
-    计算牛顿插值的差商表
-    n个点可以确定一个n-1阶多项式
-    """
+def get_diff_quotient(x, y):
+    # 计算差商表，返回对角线元素用于构造多项式
     n = len(y)
     coef = np.zeros([n, n])
     coef[:, 0] = y
@@ -16,51 +13,47 @@ def get_divided_diff_table(x, y):
             
     return coef[0, :]
 
-def newton_poly(coef, x_data, x):
-    """
-    计算牛顿多项式在点 x 处的值
-    """
+def calc_newton_poly(coef, x_data, target_x):
+    # 根据差商和节点计算插值结果
     n = len(coef) - 1
     p = coef[n]
     for k in range(1, n + 1):
-        p = coef[n - k] + (x - x_data[n - k]) * p
+        p = coef[n - k] + (target_x - x_data[n - k]) * p
     return p
 
-def interpolate_missing_values(df, x_col, y_col, order=2):
-    """
-    使用牛顿插值法填充缺失值
-    order: 插值阶数。默认2阶（需要3个已知点），比线性插值更平滑
-    """
+def newton_interpolate_df(df, x_col, y_col, order=2):
+    # 基于临近节点的局部牛顿插值，填补 NaN
     valid_df = df.dropna(subset=[y_col])
     known_x = valid_df[x_col].values
     known_y = valid_df[y_col].values
     
-    missing_indices = df[df[y_col].isnull()].index
+    missing_idx = df[df[y_col].isnull()].index
     
-    for idx in missing_indices:
+    for idx in missing_idx:
         xi = df.at[idx, x_col]
         
-        distances = np.abs(known_x - xi)
-        nearest_indices = np.argsort(distances)[:order + 1]
+        # 寻找距离 xi 最近的 order + 1 个点进行局部插值
+        dist = np.abs(known_x - xi)
+        nearest_idx = np.argsort(dist)[:order + 1]
         
-        subset_x = known_x[nearest_indices]
-        subset_y = known_y[nearest_indices]
+        sub_x = known_x[nearest_idx]
+        sub_y = known_y[nearest_idx]
         
-        sort_idx = np.argsort(subset_x)
-        subset_x = subset_x[sort_idx]
-        subset_y = subset_y[sort_idx]
+        # 保持 x 节点递增顺序
+        sort_mask = np.argsort(sub_x)
+        sub_x = sub_x[sort_mask]
+        sub_y = sub_y[sort_mask]
         
         try:
-            coef = get_divided_diff_table(subset_x, subset_y)
-            interpolated_y = newton_poly(coef, subset_x, xi)
-            df.at[idx, y_col] = interpolated_y
+            coef = get_diff_quotient(sub_x, sub_y)
+            df.at[idx, y_col] = calc_newton_poly(coef, sub_x, xi)
         except ZeroDivisionError:
-            print(f"警告：在点 {xi} 处发生除零错误，可能是由于重复的 x 坐标导致。")
+            print(f">> 节点 {xi} 差商计算除零，跳过该点。")
             continue
 
 if __name__ == '__main__':
+    data_path = '../../data/raw/data1.xlsx' 
     try:
-        data_path = '../../data/raw/data1.xlsx' 
         df = pd.read_excel(data_path)
     except FileNotFoundError:
         df = pd.read_excel('data1.xlsx')
@@ -70,9 +63,8 @@ if __name__ == '__main__':
 
     for col in target_cols:
         if col in df.columns:
-            print(f"正在对 {col} 进行牛顿插值处理...")
-            interpolate_missing_values(df, time_col, col, order=2)
+            newton_interpolate_df(df, time_col, col, order=2)
 
-    output_path = '../../data/processed/data_interpolated.xlsx'
-    df.to_excel(output_path, index=False)
-    print(f"处理完成！结果已保存至: {output_path}")
+    out_path = '../../data/processed/data_interpolated.xlsx'
+    df.to_excel(out_path, index=False)
+    print(">> 缺失值局部插值完成。")
